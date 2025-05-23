@@ -1,4 +1,3 @@
-
 const express = require('express');
 const cors = require('cors');
 const axios = require('axios');
@@ -112,10 +111,12 @@ app.get('/api/products/:id', async (req, res) => {
   }
 });
 
-// Fixed related products endpoint
-app.get('/api/products/related', async (req, res) => {
+// Updated related products endpoint - use a query approach instead of a path parameter
+app.get('/api/related-products', async (req, res) => {
   try {
     const { product_id, category_id, per_page = 3 } = req.query;
+    
+    console.log(`Fetching related products for product ${product_id} in category ${category_id}`);
     
     if (!category_id) {
       return res.status(400).json({ 
@@ -137,6 +138,7 @@ app.get('/api/products/related', async (req, res) => {
       ? response.data.map(product => parseStockInfo(product))
       : [];
     
+    console.log(`Found ${products.length} related products for product ${product_id}`);
     res.json({ products });
   } catch (error) {
     console.error('Error fetching related products:', error.message);
@@ -153,6 +155,14 @@ app.get('/api/payment-gateways', async (req, res) => {
     
     // Filter to only return enabled payment gateways
     const enabledGateways = response.data.filter(gateway => gateway.enabled === true);
+    
+    // Make sure we log instructions for debugging
+    enabledGateways.forEach(gateway => {
+      if (gateway.id === 'bacs' && gateway.instructions) {
+        console.log(`BACS payment instructions: ${gateway.instructions}`);
+      }
+    });
+    
     console.log(`Found ${enabledGateways.length} enabled payment gateways`);
     
     res.json({ payment_gateways: enabledGateways });
