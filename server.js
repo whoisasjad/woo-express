@@ -54,6 +54,172 @@ const parseStockInfo = (product) => {
   return product;
 };
 
+// ADMIN ROUTES
+// Get products for admin with search functionality
+app.get('/api/admin/products', async (req, res) => {
+  try {
+    const { page = 1, per_page = 10, search = '' } = req.query;
+    
+    console.log(`Admin: Fetching products page ${page}, per_page ${per_page}, search: ${search}`);
+    
+    const params = { 
+      page,
+      per_page,
+      orderby: 'date',
+      order: 'desc'
+    };
+    
+    if (search) {
+      params.search = search;
+    }
+    
+    const response = await wooCommerceAPI.get('/products', { params });
+    
+    // Ensure stock information is correctly parsed for each product
+    if (response.data && Array.isArray(response.data)) {
+      response.data = response.data.map(product => parseStockInfo(product));
+    }
+    
+    res.json({
+      products: response.data,
+      total: parseInt(response.headers['x-wp-total'] || '0'),
+      totalPages: parseInt(response.headers['x-wp-totalpages'] || '0')
+    });
+  } catch (error) {
+    console.error('Admin: Error fetching products:', error.message);
+    res.status(500).json({ 
+      error: 'Failed to fetch products',
+      message: error.message
+    });
+  }
+});
+
+// Create new product
+app.post('/api/admin/products', async (req, res) => {
+  try {
+    console.log('Admin: Creating new product:', req.body);
+    const response = await wooCommerceAPI.post('/products', req.body);
+    console.log('Admin: Product created successfully:', response.data.id);
+    res.json({ product: response.data });
+  } catch (error) {
+    console.error('Admin: Error creating product:', error.message);
+    res.status(500).json({ 
+      error: 'Failed to create product',
+      message: error.response?.data?.message || error.message
+    });
+  }
+});
+
+// Update product
+app.put('/api/admin/products/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    console.log(`Admin: Updating product ${id}:`, req.body);
+    const response = await wooCommerceAPI.put(`/products/${id}`, req.body);
+    console.log('Admin: Product updated successfully');
+    res.json({ product: response.data });
+  } catch (error) {
+    console.error(`Admin: Error updating product ${req.params.id}:`, error.message);
+    res.status(500).json({ 
+      error: 'Failed to update product',
+      message: error.response?.data?.message || error.message
+    });
+  }
+});
+
+// Delete product
+app.delete('/api/admin/products/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    console.log(`Admin: Deleting product ${id}`);
+    const response = await wooCommerceAPI.delete(`/products/${id}`, {
+      params: { force: true } // Permanently delete
+    });
+    console.log('Admin: Product deleted successfully');
+    res.json({ success: true, message: 'Product deleted successfully' });
+  } catch (error) {
+    console.error(`Admin: Error deleting product ${req.params.id}:`, error.message);
+    res.status(500).json({ 
+      error: 'Failed to delete product',
+      message: error.response?.data?.message || error.message
+    });
+  }
+});
+
+// Get orders for admin
+app.get('/api/admin/orders', async (req, res) => {
+  try {
+    const { page = 1, per_page = 10, status, search = '' } = req.query;
+    
+    console.log(`Admin: Fetching orders page ${page}, per_page ${per_page}, status: ${status}, search: ${search}`);
+    
+    const params = { 
+      page,
+      per_page,
+      orderby: 'date',
+      order: 'desc'
+    };
+    
+    if (status) {
+      params.status = status;
+    }
+    
+    if (search) {
+      params.search = search;
+    }
+    
+    const response = await wooCommerceAPI.get('/orders', { params });
+    
+    console.log(`Admin: Found ${response.data.length} orders`);
+    
+    res.json({
+      orders: response.data,
+      total: parseInt(response.headers['x-wp-total'] || '0'),
+      totalPages: parseInt(response.headers['x-wp-totalpages'] || '0')
+    });
+  } catch (error) {
+    console.error('Admin: Error fetching orders:', error.message);
+    res.status(500).json({ 
+      error: 'Failed to fetch orders',
+      message: error.message
+    });
+  }
+});
+
+// Get specific order for admin
+app.get('/api/admin/orders/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    console.log(`Admin: Fetching order ${id}`);
+    const response = await wooCommerceAPI.get(`/orders/${id}`);
+    console.log('Admin: Order fetched successfully');
+    res.json({ order: response.data });
+  } catch (error) {
+    console.error(`Admin: Error fetching order ${req.params.id}:`, error.message);
+    res.status(500).json({ 
+      error: 'Failed to fetch order',
+      message: error.message
+    });
+  }
+});
+
+// Update order status
+app.put('/api/admin/orders/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    console.log(`Admin: Updating order ${id} status:`, req.body);
+    const response = await wooCommerceAPI.put(`/orders/${id}`, req.body);
+    console.log('Admin: Order status updated successfully');
+    res.json({ order: response.data });
+  } catch (error) {
+    console.error(`Admin: Error updating order ${req.params.id}:`, error.message);
+    res.status(500).json({ 
+      error: 'Failed to update order',
+      message: error.response?.data?.message || error.message
+    });
+  }
+});
+
 // Routes
 app.get('/api/products', async (req, res) => {
   try {
