@@ -88,6 +88,41 @@ app.get('/api/products', async (req, res) => {
   }
 });
 
+// New endpoint for featured products
+app.get('/api/products/featured', async (req, res) => {
+  try {
+    const { per_page = 6 } = req.query;
+    
+    console.log(`Fetching featured products, per_page ${per_page}`);
+    
+    const response = await wooCommerceAPI.get('/products', {
+      params: {
+        featured: true,
+        per_page
+      }
+    });
+    
+    // Ensure stock information is correctly parsed for each product
+    const products = Array.isArray(response.data) 
+      ? response.data.map(product => parseStockInfo(product))
+      : [];
+    
+    console.log(`Found ${products.length} featured products`);
+    
+    res.json({
+      products: products,
+      total: parseInt(response.headers['x-wp-total'] || '0'),
+      totalPages: parseInt(response.headers['x-wp-totalpages'] || '0')
+    });
+  } catch (error) {
+    console.error('Error fetching featured products from WooCommerce:', error.message);
+    res.status(500).json({ 
+      error: 'Failed to fetch featured products',
+      message: error.message
+    });
+  }
+});
+
 app.get('/api/products/:id', async (req, res) => {
   try {
     const response = await wooCommerceAPI.get(`/products/${req.params.id}`);
