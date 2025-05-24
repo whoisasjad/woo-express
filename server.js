@@ -293,38 +293,68 @@ app.post('/api/shipping/calculate', async (req, res) => {
   try {
     const { cart_items, shipping_address } = req.body;
     console.log('Calculating shipping for cart with', cart_items?.length || 0, 'items');
+    console.log('Shipping address country:', shipping_address?.country);
     
     // First get shipping zones
     const zonesResponse = await wooCommerceAPI.get('/shipping/zones');
     
-    // Find the appropriate zone based on shipping address
-    let selectedZone = zonesResponse.data.find(zone => {
-      // Check if the zone applies to the shipping address
-      // This is a simplified logic - in reality, you'd need to check zone locations
-      return zone.name !== 'Locations not covered by your other zones';
-    });
+    // Find the appropriate zone based on shipping address country
+    let selectedZone = null;
     
-    // If no specific zone found, use the default zone (usually the last one)
-    if (!selectedZone) {
-      selectedZone = zonesResponse.data[zonesResponse.data.length - 1];
+    // Look for a zone that specifically covers the shipping country
+    for (const zone of zonesResponse.data) {
+      try {
+        // Get zone locations to check if it covers the shipping country
+        const locationsResponse = await wooCommerceAPI.get(`/shipping/zones/${zone.id}/locations`);
+        const locations = locationsResponse.data;
+        
+        // Check if any location matches the shipping country
+        const countryMatch = locations.find(location => 
+          location.type === 'country' && 
+          location.code === shipping_address.country
+        );
+        
+        if (countryMatch) {
+          selectedZone = zone;
+          console.log(`Found matching zone: ${zone.name} for country ${shipping_address.country}`);
+          break;
+        }
+      } catch (error) {
+        console.log(`Could not fetch locations for zone ${zone.id}`);
+      }
     }
     
-    console.log(`Using shipping zone: ${selectedZone.name} (ID: ${selectedZone.id})`);
+    // If no specific zone found, use the first available zone or default zone
+    if (!selectedZone) {
+      selectedZone = zonesResponse.data.find(zone => 
+        zone.name !== 'Locations not covered by your other zones'
+      ) || zonesResponse.data[0];
+      
+      console.log(`Using fallback zone: ${selectedZone?.name} (ID: ${selectedZone?.id})`);
+    }
+    
+    if (!selectedZone) {
+      throw new Error('No shipping zones available');
+    }
     
     // Get shipping methods for the selected zone
     const methodsResponse = await wooCommerceAPI.get(`/shipping/zones/${selectedZone.id}/methods`);
     const enabledMethods = methodsResponse.data.filter(method => method.enabled === true);
     
-    console.log(`Found ${enabledMethods.length} enabled shipping methods`);
+    console.log(`Found ${enabledMethods.length} enabled shipping methods for zone ${selectedZone.name}`);
     
     // Calculate total cart value for percentage-based shipping
     const cartTotal = cart_items.reduce((total, item) => {
       return total + (item.price * item.quantity);
     }, 0);
     
+    console.log(`Cart total for shipping calculation: ${cartTotal}`);
+    
     // Process shipping methods and calculate costs
     const shippingOptions = enabledMethods.map(method => {
       let cost = 0;
+      let title = method.method_title || method.title || 'Shipping';
+      let description = '';
       
       // Parse the cost based on method settings
       if (method.settings && method.settings.cost) {
@@ -345,17 +375,50 @@ app.post('/api/shipping/calculate', async (req, res) => {
         }
       }
       
+      // Get custom title if available
+      if (method.settings && method.settings.title && method.settings.title.value) {
+        title = method.settings.title.value;
+      }
+      
+      // Clean up description - remove HTML tags and get meaningful description
+      if (method.method_description) {
+        description = method.method_description.replace(/<[^>]*>/g, '').trim();
+      } else if (method.settings && method.settings.description && method.settings.description.value) {
+        description = method.settings.description.value.replace(/<[^>]*>/g, '').trim();
+      }
+      
+      // Provide default descriptions based on method type
+      if (!description || description.length < 5) {
+        switch (method.method_id) {
+          case 'free_shipping':
+            description = 'Free delivery to your address';
+            break;
+          case 'flat_rate':
+            description = cost > 0 ? `Fixed rate delivery` : 'Standard delivery';
+            break;
+          case 'local_pickup':
+            description = 'Pick up from our location';
+            break;
+          default:
+            description = 'Delivery service';
+        }
+      }
+      
       return {
         id: method.method_id,
         instance_id: method.instance_id,
-        title: method.method_title,
+        title: title,
         cost: cost,
-        description: method.method_description || '',
+        description: description,
         enabled: method.enabled
       };
     });
     
-    console.log('Calculated shipping options:', shippingOptions);
+    console.log('Calculated shipping options:', shippingOptions.map(opt => ({
+      title: opt.title,
+      cost: opt.cost,
+      description: opt.description
+    })));
     
     res.json({ 
       shipping_options: shippingOptions,
