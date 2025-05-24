@@ -250,6 +250,126 @@ app.post('/api/orders', async (req, res) => {
   }
 });
 
+// Get shipping zones and methods
+app.get('/api/shipping/zones', async (req, res) => {
+  try {
+    console.log('Fetching shipping zones from WooCommerce');
+    const response = await wooCommerceAPI.get('/shipping/zones');
+    
+    console.log(`Found ${response.data.length} shipping zones`);
+    
+    res.json({ shipping_zones: response.data });
+  } catch (error) {
+    console.error('Error fetching shipping zones:', error.message);
+    res.status(500).json({ 
+      error: 'Failed to fetch shipping zones',
+      message: error.message
+    });
+  }
+});
+
+// Get shipping methods for a specific zone
+app.get('/api/shipping/zones/:zone_id/methods', async (req, res) => {
+  try {
+    const { zone_id } = req.params;
+    console.log(`Fetching shipping methods for zone ${zone_id}`);
+    
+    const response = await wooCommerceAPI.get(`/shipping/zones/${zone_id}/methods`);
+    
+    console.log(`Found ${response.data.length} shipping methods for zone ${zone_id}`);
+    
+    res.json({ shipping_methods: response.data });
+  } catch (error) {
+    console.error(`Error fetching shipping methods for zone ${req.params.zone_id}:`, error.message);
+    res.status(500).json({ 
+      error: 'Failed to fetch shipping methods',
+      message: error.message
+    });
+  }
+});
+
+// Calculate shipping for cart
+app.post('/api/shipping/calculate', async (req, res) => {
+  try {
+    const { cart_items, shipping_address } = req.body;
+    console.log('Calculating shipping for cart with', cart_items?.length || 0, 'items');
+    
+    // First get shipping zones
+    const zonesResponse = await wooCommerceAPI.get('/shipping/zones');
+    
+    // Find the appropriate zone based on shipping address
+    let selectedZone = zonesResponse.data.find(zone => {
+      // Check if the zone applies to the shipping address
+      // This is a simplified logic - in reality, you'd need to check zone locations
+      return zone.name !== 'Locations not covered by your other zones';
+    });
+    
+    // If no specific zone found, use the default zone (usually the last one)
+    if (!selectedZone) {
+      selectedZone = zonesResponse.data[zonesResponse.data.length - 1];
+    }
+    
+    console.log(`Using shipping zone: ${selectedZone.name} (ID: ${selectedZone.id})`);
+    
+    // Get shipping methods for the selected zone
+    const methodsResponse = await wooCommerceAPI.get(`/shipping/zones/${selectedZone.id}/methods`);
+    const enabledMethods = methodsResponse.data.filter(method => method.enabled === true);
+    
+    console.log(`Found ${enabledMethods.length} enabled shipping methods`);
+    
+    // Calculate total cart value for percentage-based shipping
+    const cartTotal = cart_items.reduce((total, item) => {
+      return total + (item.price * item.quantity);
+    }, 0);
+    
+    // Process shipping methods and calculate costs
+    const shippingOptions = enabledMethods.map(method => {
+      let cost = 0;
+      
+      // Parse the cost based on method settings
+      if (method.settings && method.settings.cost) {
+        const costValue = method.settings.cost.value;
+        if (costValue) {
+          // Handle different cost formats
+          if (costValue.includes('%')) {
+            // Percentage of cart total
+            const percentage = parseFloat(costValue.replace('%', ''));
+            cost = (cartTotal * percentage) / 100;
+          } else if (costValue === 'min_amount') {
+            // Use minimum amount if set
+            cost = method.settings.min_amount ? parseFloat(method.settings.min_amount.value) : 0;
+          } else {
+            // Fixed amount
+            cost = parseFloat(costValue) || 0;
+          }
+        }
+      }
+      
+      return {
+        id: method.method_id,
+        instance_id: method.instance_id,
+        title: method.method_title,
+        cost: cost,
+        description: method.method_description || '',
+        enabled: method.enabled
+      };
+    });
+    
+    console.log('Calculated shipping options:', shippingOptions);
+    
+    res.json({ 
+      shipping_options: shippingOptions,
+      zone: selectedZone
+    });
+  } catch (error) {
+    console.error('Error calculating shipping:', error.message);
+    res.status(500).json({ 
+      error: 'Failed to calculate shipping',
+      message: error.message
+    });
+  }
+});
+
 // Health check endpoint
 app.get('/health', (req, res) => {
   res.status(200).json({ status: 'ok' });
